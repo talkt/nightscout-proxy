@@ -2,7 +2,7 @@ const express = require("express");
 
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 app.use((req, res, next) => {
   console.log("REQUEST:", req.method, req.url);
@@ -64,7 +64,7 @@ ORIGINAL MOCK ENDPOINTS
 ========================================
 */
 
-app.post("/glucose", async (req, res) => {
+app.post("/glucose", (req, res) => {
   const event = normalizeToInternalEvent(req.body, req.body.source || "mock");
 
   glucoseEvents.unshift(event);
@@ -84,7 +84,7 @@ app.get("/glucose", (req, res) => {
 
 /*
 ========================================
-NIGHTSCOUT COMPATIBILITY
+NIGHTSCOUT COMPATIBILITY - GET
 ========================================
 */
 
@@ -101,7 +101,17 @@ app.get("/api/v1/entries", (req, res) => {
   res.json(formatted);
 });
 
+app.get("/api/v1/entries/", (req, res) => {
+  const formatted = glucoseEvents.map(toNightscoutEntry);
+  res.json(formatted);
+});
+
 app.get("/api/v1/entries.json", (req, res) => {
+  const formatted = glucoseEvents.map(toNightscoutEntry);
+  res.json(formatted);
+});
+
+app.get("/api/v1/entries.json/", (req, res) => {
   const formatted = glucoseEvents.map(toNightscoutEntry);
   res.json(formatted);
 });
@@ -111,18 +121,30 @@ app.get("/api/v1/entries/sgv.json", (req, res) => {
   res.json(formatted);
 });
 
-app.post("/api/v1/entries", async (req, res) => {
-  try {
-    const body = Array.isArray(req.body) ? req.body[0] : req.body;
-    const event = normalizeToInternalEvent(body, "juggluco");
+/*
+========================================
+NIGHTSCOUT COMPATIBILITY - POST
+========================================
+*/
 
-    glucoseEvents.unshift(event);
+async function handleNightscoutUpload(req, res) {
+  try {
+    console.log("UPLOAD HIT:", req.method, req.url);
+    console.log("UPLOAD BODY:", JSON.stringify(req.body));
+
+    const rawItems = Array.isArray(req.body) ? req.body : [req.body];
+
+    const events = rawItems.map((item) =>
+      normalizeToInternalEvent(item, "juggluco")
+    );
+
+    glucoseEvents.unshift(...events);
     glucoseEvents = glucoseEvents.slice(0, 100);
 
-    const nightscoutEntry = toNightscoutEntry(event);
+    const nightscoutEntries = events.map(toNightscoutEntry);
 
-    console.log("Juggluco entry:", event);
-    console.log("Forwarding to Nightscout:", nightscoutEntry);
+    console.log("NORMALIZED EVENTS:", JSON.stringify(events));
+    console.log("FORWARDING TO NIGHTSCOUT:", JSON.stringify(nightscoutEntries));
 
     const nsUrl = process.env.NIGHTSCOUT_URL;
     const apiSecretHash = process.env.API_SECRET_HASH;
@@ -141,28 +163,53 @@ app.post("/api/v1/entries", async (req, res) => {
         "Content-Type": "application/json",
         "api-secret": apiSecretHash
       },
-      body: JSON.stringify([nightscoutEntry])
+      body: JSON.stringify(nightscoutEntries)
     });
 
     const text = await response.text();
 
-    console.log("Nightscout response:", response.status, text);
+    console.log("NIGHTSCOUT RESPONSE:", response.status, text);
 
-    res.json({
+    res.status(response.ok ? 200 : 502).json({
       ok: response.ok,
       nightscoutStatus: response.status,
-      received: event,
-      forwarded: nightscoutEntry,
-      response: text
+      received: events,
+      forwarded: nightscoutEntries,
+      nightscoutResponse: text
     });
   } catch (err) {
-    console.error("Upload error:", err);
+    console.error("UPLOAD ERROR:", err);
 
     res.status(500).json({
       ok: false,
       error: err.message
     });
   }
+}
+
+app.post("/api/v1/entries", handleNightscoutUpload);
+app.post("/api/v1/entries/", handleNightscoutUpload);
+app.post("/api/v1/entries.json", handleNightscoutUpload);
+app.post("/api/v1/entries.json/", handleNightscoutUpload);
+app.post("/api/v1/entries/sgv.json", handleNightscoutUpload);
+app.post("/api/v3/entries", handleNightscoutUpload);
+app.post("/api/v3/entries/", handleNightscoutUpload);
+
+/*
+========================================
+DEBUG - UNMATCHED ROUTES
+========================================
+*/
+
+app.use((req, res) => {
+  console.log("UNMATCHED:", req.method, req.url);
+
+  res.status(404).json({
+    ok: false,
+    error: "Route not found",
+    method: req.method,
+    url: req.url
+  });
 });
 
 /*

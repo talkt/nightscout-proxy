@@ -64,7 +64,7 @@ ORIGINAL MOCK ENDPOINTS
 ========================================
 */
 
-app.post("/glucose", (req, res) => {
+app.post("/glucose", async (req, res) => {
   const event = normalizeToInternalEvent(req.body, req.body.source || "mock");
 
   glucoseEvents.unshift(event);
@@ -96,6 +96,11 @@ app.get("/api/v1/status.json", (req, res) => {
   });
 });
 
+app.get("/api/v1/entries", (req, res) => {
+  const formatted = glucoseEvents.map(toNightscoutEntry);
+  res.json(formatted);
+});
+
 app.get("/api/v1/entries.json", (req, res) => {
   const formatted = glucoseEvents.map(toNightscoutEntry);
   res.json(formatted);
@@ -106,19 +111,58 @@ app.get("/api/v1/entries/sgv.json", (req, res) => {
   res.json(formatted);
 });
 
-app.post("/api/v1/entries", (req, res) => {
-  const body = Array.isArray(req.body) ? req.body[0] : req.body;
-  const event = normalizeToInternalEvent(body, "nightscout");
+app.post("/api/v1/entries", async (req, res) => {
+  try {
+    const body = Array.isArray(req.body) ? req.body[0] : req.body;
+    const event = normalizeToInternalEvent(body, "juggluco");
 
-  glucoseEvents.unshift(event);
-  glucoseEvents = glucoseEvents.slice(0, 100);
+    glucoseEvents.unshift(event);
+    glucoseEvents = glucoseEvents.slice(0, 100);
 
-  console.log("Nightscout entry:", event);
+    const nightscoutEntry = toNightscoutEntry(event);
 
-  res.json({
-    status: "ok",
-    received: event
-  });
+    console.log("Juggluco entry:", event);
+    console.log("Forwarding to Nightscout:", nightscoutEntry);
+
+    const nsUrl = process.env.NIGHTSCOUT_URL;
+    const apiSecretHash = process.env.API_SECRET_HASH;
+
+    if (!nsUrl) {
+      throw new Error("Missing NIGHTSCOUT_URL env variable");
+    }
+
+    if (!apiSecretHash) {
+      throw new Error("Missing API_SECRET_HASH env variable");
+    }
+
+    const response = await fetch(`${nsUrl}/api/v1/entries.json`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-secret": apiSecretHash
+      },
+      body: JSON.stringify([nightscoutEntry])
+    });
+
+    const text = await response.text();
+
+    console.log("Nightscout response:", response.status, text);
+
+    res.json({
+      ok: response.ok,
+      nightscoutStatus: response.status,
+      received: event,
+      forwarded: nightscoutEntry,
+      response: text
+    });
+  } catch (err) {
+    console.error("Upload error:", err);
+
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
 });
 
 /*
@@ -130,5 +174,5 @@ START SERVER
 const port = process.env.PORT || 3000;
 
 app.listen(port, () => {
-  console.log("Proxy running");
+  console.log("Proxy running on port", port);
 });

@@ -1,11 +1,13 @@
 console.log("BOOT TEST CLICKEAT 123");
+
 const express = require("express");
+const crypto = require("crypto");
 
 const app = express();
 
-const PROXY_VERSION = "juggluco-forwarding-v2";
+const PROXY_VERSION = "juggluco-forwarding-v3-secret-fix";
 
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 app.use((req, res, next) => {
   console.log("REQUEST:", req.method, req.url);
@@ -20,6 +22,21 @@ HELPERS
 ========================================
 */
 
+function getApiSecretHash() {
+  if (process.env.API_SECRET_HASH) {
+    return process.env.API_SECRET_HASH.trim();
+  }
+
+  if (process.env.API_SECRET) {
+    return crypto
+      .createHash("sha1")
+      .update(process.env.API_SECRET.trim())
+      .digest("hex");
+  }
+
+  return null;
+}
+
 function normalizeToInternalEvent(body, source) {
   const timestamp =
     body.dateString ||
@@ -27,9 +44,9 @@ function normalizeToInternalEvent(body, source) {
     (body.date ? new Date(body.date).toISOString() : new Date().toISOString());
 
   const glucoseMgDl =
-    body.glucoseMgDl ||
-    body.sgv ||
-    body.glucose ||
+    body.glucoseMgDl ??
+    body.sgv ??
+    body.glucose ??
     body.value;
 
   return {
@@ -53,20 +70,21 @@ function toNightscoutEntry(event) {
 
 async function forwardToNightscout(entries) {
   const nsUrl = process.env.NIGHTSCOUT_URL;
-  const apiSecretHash = process.env.API_SECRET_HASH;
+  const apiSecretHash = getApiSecretHash();
 
   if (!nsUrl) {
     throw new Error("Missing NIGHTSCOUT_URL");
   }
 
   if (!apiSecretHash) {
-    throw new Error("Missing API_SECRET_HASH");
+    throw new Error("Missing API_SECRET or API_SECRET_HASH");
   }
 
   const cleanNsUrl = nsUrl.replace(/\/+$/, "");
   const targetUrl = `${cleanNsUrl}/api/v1/entries.json`;
 
   console.log("FORWARD TARGET:", targetUrl);
+  console.log("API SECRET HASH LENGTH:", apiSecretHash.length);
   console.log("FORWARD BODY:", JSON.stringify(entries));
 
   const response = await fetch(targetUrl, {
@@ -103,7 +121,11 @@ app.get("/", (req, res) => {
 app.get("/debug/version", (req, res) => {
   res.json({
     ok: true,
-    version: PROXY_VERSION
+    version: PROXY_VERSION,
+    hasNightscoutUrl: Boolean(process.env.NIGHTSCOUT_URL),
+    hasApiSecret: Boolean(process.env.API_SECRET),
+    hasApiSecretHash: Boolean(process.env.API_SECRET_HASH),
+    apiSecretHashLength: getApiSecretHash()?.length || 0
   });
 });
 
@@ -184,7 +206,6 @@ UPLOAD ROUTES
 app.post(/^\/+api\/v1\/entries(?:\.json)?\/?$/, handleUpload);
 app.post(/^\/+api\/v1\/entries\/sgv\.json\/?$/, handleUpload);
 app.post(/^\/+api\/v3\/entries\/?$/, handleUpload);
-
 app.post("/glucose", handleUpload);
 
 /*

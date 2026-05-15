@@ -1,3 +1,4 @@
+console.log("BOOT TEST CLICKEAT 123");
 const express = require("express");
 
 const app = express();

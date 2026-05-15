@@ -4,6 +4,23 @@ const app = express();
 
 app.use(express.json({ limit: "2mb" }));
 
+/*
+========================================
+NORMALIZE DOUBLE SLASHES
+========================================
+*/
+
+app.use((req, res, next) => {
+  req.url = req.url.replace(/^\/+/, "/");
+  next();
+});
+
+/*
+========================================
+LOG REQUESTS
+========================================
+*/
+
 app.use((req, res, next) => {
   console.log("REQUEST:", req.method, req.url);
   next();
@@ -60,7 +77,7 @@ app.get("/", (req, res) => {
 
 /*
 ========================================
-ORIGINAL MOCK ENDPOINTS
+MOCK ENDPOINTS
 ========================================
 */
 
@@ -84,7 +101,7 @@ app.get("/glucose", (req, res) => {
 
 /*
 ========================================
-NIGHTSCOUT COMPATIBILITY - GET
+NIGHTSCOUT GET ENDPOINTS
 ========================================
 */
 
@@ -101,17 +118,7 @@ app.get("/api/v1/entries", (req, res) => {
   res.json(formatted);
 });
 
-app.get("/api/v1/entries/", (req, res) => {
-  const formatted = glucoseEvents.map(toNightscoutEntry);
-  res.json(formatted);
-});
-
 app.get("/api/v1/entries.json", (req, res) => {
-  const formatted = glucoseEvents.map(toNightscoutEntry);
-  res.json(formatted);
-});
-
-app.get("/api/v1/entries.json/", (req, res) => {
   const formatted = glucoseEvents.map(toNightscoutEntry);
   res.json(formatted);
 });
@@ -123,7 +130,7 @@ app.get("/api/v1/entries/sgv.json", (req, res) => {
 
 /*
 ========================================
-NIGHTSCOUT COMPATIBILITY - POST
+UPLOAD HANDLER
 ========================================
 */
 
@@ -187,6 +194,12 @@ async function handleNightscoutUpload(req, res) {
   }
 }
 
+/*
+========================================
+POST ROUTES
+========================================
+*/
+
 app.post("/api/v1/entries", handleNightscoutUpload);
 app.post("/api/v1/entries/", handleNightscoutUpload);
 app.post("/api/v1/entries.json", handleNightscoutUpload);
@@ -197,7 +210,7 @@ app.post("/api/v3/entries/", handleNightscoutUpload);
 
 /*
 ========================================
-DEBUG - UNMATCHED ROUTES
+UNMATCHED ROUTES
 ========================================
 */
 
